@@ -71,6 +71,10 @@ object SwipeDownToSearchHook {
     /** 过渡期把抽屉压暗到的亮度比例(0~1,越小越黑;模糊+压暗一起遮挡) */
     private const val DIM_SCALE = 0.22f
 
+    /** 过渡期被藏起来的 all-apps 网格 RV,过渡结束时恢复 alpha */
+    @Volatile
+    private var hiddenGridView: View? = null
+
     /**
      * 进搜索模式后、撤掉模糊前的延迟(毫秒)。
      * 历史是一行、不做上移定位,所以只需给搜索结果渲染留一两帧即可,不必久等。
@@ -132,18 +136,26 @@ object SwipeDownToSearchHook {
         }
         goToState.isAccessible = true
         goToState.invoke(stateManager, allAppsState, false)
-        // 立即捕获本次抽屉会话的 baseline —— 桌面刚把 RV 摆到 ALL_APPS 的自然位置,
-        // 这一刻读 translationY 就是「本次会话的真值」。SearchResultHook 在空查询
-        // (历史)时会还原到这个值,所以不会被上次会话留下的位移污染(如搜过 te 后
-        // 再下拉,RV 不会还停在两行上方的位置)。
+        // 立即捕获本次抽屉会话的 baseline(SearchResultHook 在空查询时还原用)
         runCatching {
-            val appsView = invokeNoArg(launcher, "getAppsView")
-            val searchRv = appsView?.let { invokeNoArg(it, "getActiveSearchRecyclerView") } as? View
+            val appsViewForBaseline = invokeNoArg(launcher, "getAppsView")
+            val searchRv = appsViewForBaseline?.let {
+                invokeNoArg(it, "getActiveSearchRecyclerView")
+            } as? View
             if (searchRv != null) {
                 SearchResultHook.sessionBaselineTy = searchRv.translationY
             }
         }
-        // 立即套效果:从这一刻起,应用网格那一闪都被模糊糊住
+        // **同步**进搜索模式 —— 抽屉是 instant 切换的、状态已稳定,
+        // 此刻 onSearchBarClick 能直接生效,让搜索模式从第一帧就接管,
+        // 桌面会自动隐藏 all-apps 图标网格 —— 没有「网格闪一下」可言。
+        // 后面的 enterSearchMode 重试循环作为兜底:万一同步没成,会再试。
+        runCatching {
+            val appsViewForSync = invokeNoArg(launcher, "getAppsView")
+            val searchUi = appsViewForSync?.let { invokeNoArg(it, "getSearchUiManager") }
+            if (searchUi != null) invokeNoArg(searchUi, "onSearchBarClick")
+        }
+        // 立即套效果:模糊+压暗 + 网格 alpha=0 兜底
         setTransitionEffect(launcher, on = true)
         true
     }.onFailure { YLog.error("打开抽屉失败:${it.message}") }.getOrDefault(false)
@@ -198,17 +210,36 @@ object SwipeDownToSearchHook {
     }
 
     /**
-     * 给抽屉容器视图套 / 撤过渡模糊(RenderEffect)。
+     * 过渡期双保险:① 把抽屉内容容器 alpha=0(藏图标/Tab/A-Z),
+     * ② 给 appsView 套强模糊+压暗 RenderEffect(兜底糊掉任何 alpha 没盖住的像素)。
      *
-     * RenderEffect 作用在视图自身渲染上,不受窗口层级影响 —— 这是几种方案里
-     * 唯一能可靠影响到 OnePlus 抽屉的(visibility、外加遮罩 View 都被挡在外面)。
+     * `b_level_apps_view_translate` 是除壁纸虚化外的所有抽屉内容容器;它 alpha=0
+     * 后,壁纸虚化(它的兄弟节点 `all_apps_bg_layer`)继续显示,那本就是搜索界面
+     * 的常态背景,视觉上是「壁纸糊一下,搜索框带历史出现」。模糊作保险,防止极少数
+     * alpha 还没应用就被绘制了一帧的情况。
      */
     private fun setTransitionEffect(launcher: Any, on: Boolean) {
         runCatching {
             val appsView = invokeNoArg(launcher, "getAppsView") as? View ?: return
+            // ① 内容容器隐身
+            if (on) {
+                val resId = appsView.context.resources.getIdentifier(
+                    "b_level_apps_view_translate", "id", "com.android.launcher"
+                )
+                if (resId != 0) {
+                    val container = appsView.findViewById<View>(resId)
+                    if (container != null) {
+                        container.alpha = 0f
+                        hiddenGridView = container
+                    }
+                }
+            } else {
+                hiddenGridView?.alpha = 1f
+                hiddenGridView = null
+            }
+            // ② 模糊 + 压暗(兜底)
             appsView.setRenderEffect(
                 if (on) {
-                    // 强模糊 + 大幅压暗:糊掉细节的同时把整体压黑,尽量遮住底层抽屉
                     val blur = RenderEffect.createBlurEffect(
                         BLUR_RADIUS, BLUR_RADIUS, Shader.TileMode.CLAMP
                     )
@@ -224,7 +255,7 @@ object SwipeDownToSearchHook {
                             )
                         )
                     )
-                    RenderEffect.createChainEffect(dim, blur) // 先模糊,再压暗
+                    RenderEffect.createChainEffect(dim, blur)
                 } else {
                     null
                 }
