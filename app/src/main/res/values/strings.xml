@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OPlus Launcher Mod</string>
+    <string name="xposed_description">一加桌面增强:主屏幕下拉直接进入抽屉搜索</string>
+</resources>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- LSPosed 作用域:目标只有一加系统桌面 -->
+    <string-array name="xposed_scope">
+        <item>com.android.launcher</item>
+    </string-array>
+</resources>
