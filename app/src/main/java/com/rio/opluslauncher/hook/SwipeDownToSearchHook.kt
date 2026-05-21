@@ -136,16 +136,6 @@ object SwipeDownToSearchHook {
         }
         goToState.isAccessible = true
         goToState.invoke(stateManager, allAppsState, false)
-        // 立即捕获本次抽屉会话的 baseline(SearchResultHook 在空查询时还原用)
-        runCatching {
-            val appsViewForBaseline = invokeNoArg(launcher, "getAppsView")
-            val searchRv = appsViewForBaseline?.let {
-                invokeNoArg(it, "getActiveSearchRecyclerView")
-            } as? View
-            if (searchRv != null) {
-                SearchResultHook.sessionBaselineTy = searchRv.translationY
-            }
-        }
         // **同步**进搜索模式 —— 抽屉是 instant 切换的、状态已稳定,
         // 此刻 onSearchBarClick 能直接生效,让搜索模式从第一帧就接管,
         // 桌面会自动隐藏 all-apps 图标网格 —— 没有「网格闪一下」可言。

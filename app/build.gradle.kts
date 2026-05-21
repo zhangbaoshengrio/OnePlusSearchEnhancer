@@ -12,9 +12,9 @@ android {
         applicationId = "com.rio.opluslauncher"
         minSdk = 31
         targetSdk = 34
-        versionCode = 2
+        versionCode = 3
         // 版本号带上目标桌面 build,方便排查兼容问题
-        versionName = "1.0.1-oos16.4.15"
+        versionName = "1.0.2-oos16.4.15"
     }
 
     buildTypes {
